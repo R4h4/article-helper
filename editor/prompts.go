@@ -25,9 +25,14 @@ const (
 	   "summary": "Insert bullet point summary here"
    }
 `
-	HeadlinePrompt = `Based on the following summary, create a short, catchy headline with maximum 5 words that could be used as a directory name:
+	HeadlinePrompt = `Based on the following summary, create a short, catchy headline with maximum 5 words that could be used as a directory name.
+	Please provide the headline as a JSON with a single key "headline" (string). Example:
+	{
+		"headline": "Insert your headline here"
+	}
 
+	<summary>
 	%s
-
-	Please provide the headline as a simple string response.`
+	</summary>
+	`
 )

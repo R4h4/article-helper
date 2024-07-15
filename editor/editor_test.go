@@ -56,7 +56,7 @@ func TestAIEditor(t *testing.T) {
 						Message: struct {
 							Content string `json:"content"`
 						}{
-							Content: "Test_Transcript_Summary",
+							Content: `{"headline": "Test_Transcript_Summary"}`,
 						},
 					},
 				},
@@ -101,14 +101,14 @@ func TestAIEditor(t *testing.T) {
 	})
 
 	t.Run("CreateHeadline", func(t *testing.T) {
-		headline, err := editor.CreateHeadline("This is a summary of the test transcript.")
+		res, err := editor.CreateHeadline("This is a summary of the test transcript.")
 		if err != nil {
 			t.Fatalf("CreateHeadline failed: %v", err)
 		}
 
 		expectedHeadline := "Test_Transcript_Summary"
-		if headline != expectedHeadline {
-			t.Errorf("Expected headline %q, got %q", expectedHeadline, headline)
+		if res.Headline != expectedHeadline {
+			t.Errorf("Expected headline %q, got %q", expectedHeadline, res.Headline)
 		}
 	})
 }

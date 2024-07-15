@@ -37,6 +37,10 @@ type EditorResponse struct {
 	Summary              string `json:"summary"`
 }
 
+type HeadlineResponse struct {
+	Headline string `json:"headline"`
+}
+
 func NewAIEditor(apiKey string, modelUrl string) *AIEditor {
 	if modelUrl == "" {
 		modelUrl = openAIURL
@@ -63,11 +67,17 @@ func (e *AIEditor) EditAndSummarize(transcript string) (*EditorResponse, error) 
 	return &editorResp, nil
 }
 
-func (e *AIEditor) CreateHeadline(summary string) (string, error) {
+func (e *AIEditor) CreateHeadline(summary string) (*HeadlineResponse, error) {
 	result, err := e.HeadlineAgent.Process(summary)
 	if err != nil {
-		return "", fmt.Errorf("error processing with headline agent: %v", err)
+		return nil, fmt.Errorf("error processing with headline agent: %v", err)
 	}
 
-	return result.(string), nil
+	var headlineResp HeadlineResponse
+	err = json.Unmarshal([]byte(result.(string)), &headlineResp)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshaling headline response: %v", err)
+	}
+
+	return &headlineResp, nil
 }
