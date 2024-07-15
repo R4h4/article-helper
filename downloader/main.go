@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -37,62 +36,6 @@ var (
 	// Quiet parameter - will not print progress if set
 	flagQuiet = flag.Bool("quiet", false, "Quiet mode")
 )
-
-///////////////////////////////////////////////////////////////////////////////
-// MAIN
-
-func main() {
-	flag.Usage = func() {
-		name := filepath.Base(flag.CommandLine.Name())
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] <model>\n\n", name)
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-
-	// Get output path
-	out, err := GetOut()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(-1)
-	}
-
-	// Create context which quits on SIGINT or SIGQUIT
-	ctx := ContextForSignal(os.Interrupt, syscall.SIGQUIT)
-
-	// Progress filehandle
-	progress := os.Stdout
-	if *flagQuiet {
-		progress, err = os.Open(os.DevNull)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error:", err)
-			os.Exit(-1)
-		}
-		defer progress.Close()
-	}
-
-	// Download models - exit on error or interrupt
-	for _, model := range GetModels() {
-		url, err := URLForModel(model)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error:", err)
-			continue
-		} else if path, err := Download(ctx, progress, url, out); err == nil || err == io.EOF {
-			continue
-		} else if err == context.Canceled {
-			os.Remove(path)
-			fmt.Fprintln(progress, "\nInterrupted")
-			break
-		} else if err == context.DeadlineExceeded {
-			os.Remove(path)
-			fmt.Fprintln(progress, "Timeout downloading model")
-			continue
-		} else {
-			os.Remove(path)
-			fmt.Fprintln(os.Stderr, "Error:", err)
-			break
-		}
-	}
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC METHODS
@@ -205,4 +148,15 @@ func DownloadReport(w io.Writer, pct, count, total int64) int64 {
 		fmt.Fprintf(w, "  ...%d MB written (%d%%)\n", count/1e6, pct_)
 	}
 	return pct_
+}
+
+// Check if a model is already downloaded
+func IsModelDownloaded(model string, out string) bool {
+	// Check if the model is already downloaded
+	path := filepath.Join(out, filepath.Base(model))
+	if _, err := os.Stat(path); err == nil {
+		fmt.Printf("Model %s already downloaded\n", model)
+		return true
+	}
+	return false
 }

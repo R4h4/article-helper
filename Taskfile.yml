@@ -1,0 +1,61 @@
+version: '3'
+
+vars:
+  BINARY_NAME: your-app-name
+  WHISPER_CPP_DIR: ./whisper.cpp
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  setup:
+    cmds:
+      - git submodule update --init --recursive
+    status:
+      - test -d {{.WHISPER_CPP_DIR}}
+
+  build-whisper-cpp:
+    dir: '{{.WHISPER_CPP_DIR}}'
+    cmds:
+      - |
+        {{if eq OS "windows"}}
+        if not exist build mkdir build
+        cd build
+        cmake .. -G "MinGW Makefiles"
+        mingw32-make
+        {{else}}
+        mkdir -p build
+        cd build
+        cmake ..
+        make
+        {{end}}
+    sources:
+      - '{{.WHISPER_CPP_DIR}}/**/*.cpp'
+      - '{{.WHISPER_CPP_DIR}}/**/*.h'
+    generates:
+      - '{{.WHISPER_CPP_DIR}}/build/libwhisper.a'
+
+  build-go:
+    deps: [build-whisper-cpp]
+    cmds:
+      - |
+        {{if eq OS "windows"}}
+        go build -ldflags="-extldflags=-static" -tags whisper -o {{.BINARY_NAME}}.exe
+        {{else}}
+        go build -tags whisper -o {{.BINARY_NAME}}
+        {{end}}
+    sources:
+      - '**/*.go'
+    generates:
+      - '{{.BINARY_NAME}}{{exeExt}}'
+
+  build:
+    deps: [setup]
+    cmds:
+      - task: build-go
+
+  clean:
+    cmds:
+      - rm -rf {{.WHISPER_CPP_DIR}}/build
+      - rm -f {{.BINARY_NAME}}{{exeExt}}

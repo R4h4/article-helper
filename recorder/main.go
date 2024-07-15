@@ -1,78 +1,81 @@
 package recorder
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 
 	"github.com/eiannone/keyboard"
 )
 
-func ensureDir(dir string) error {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return os.MkdirAll(dir, 0755)
-	}
-	return nil
+// ConfigurableOptions allows for easier extension and configuration
+type ConfigurableOptions struct {
+	RecordingsDir string
+	AudioFormat   string
 }
 
-func RecordAudio(outputFile string) error {
-	recordingsDir := "./recordings"
-	if err := ensureDir(recordingsDir); err != nil {
+// RecordAudio records audio in the terminal and saves the output to a file
+func RecordAudio(ctx context.Context, outputFile string, opts ConfigurableOptions) error {
+	if err := ensureDir(opts.RecordingsDir); err != nil {
 		return fmt.Errorf("failed to create recordings directory: %w", err)
 	}
 
-	fullPath := filepath.Join(recordingsDir, outputFile)
+	fullPath := filepath.Join(opts.RecordingsDir, outputFile)
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("sox", "-d", "-t", "waveaudio", fullPath)
-	} else {
-		cmd = exec.Command("sox", "-d", "-t", "wav", fullPath)
+	cmd, err := createRecordCommand(fullPath, opts.AudioFormat)
+	if err != nil {
+		return fmt.Errorf("failed to create record command: %w", err)
 	}
 
-	err := cmd.Start()
-	if err != nil {
+	// Create a cancellable context
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start recording: %w", err)
 	}
 
 	fmt.Println("Recording started. Press ESC to stop...")
 
-	if err := keyboard.Open(); err != nil {
-		return fmt.Errorf("failed to open keyboard: %w", err)
-	}
+	// Setup signal handling
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
-	// Use a goroutine to listen for the ESC key
-	stopChan := make(chan struct{})
-	go func() {
-		defer keyboard.Close()
-		for {
-			_, key, err := keyboard.GetKey()
-			if err != nil {
-				fmt.Println("Error reading keyboard:", err)
-				return
-			}
-			if key == keyboard.KeyEsc {
-				close(stopChan)
-				return
-			}
+	// Setup keyboard listening
+	keyChan := make(chan keyboard.Key, 1)
+	go listenForEscKey(ctx, keyChan)
+
+	// Wait for stop signal
+	select {
+	case <-signalChan:
+		fmt.Println("\nReceived interrupt signal. Stopping recording...")
+	case key := <-keyChan:
+		if key == keyboard.KeyEsc {
+			fmt.Println("ESC pressed. Stopping recording...")
 		}
-	}()
-
-	// Wait for either the recording to finish or the stop signal
-	<-stopChan
+	case <-ctx.Done():
+		fmt.Println("Context cancelled. Stopping recording...")
+	}
 
 	// Stop the recording
-	if runtime.GOOS == "windows" {
-		cmd.Process.Kill()
-	} else {
-		cmd.Process.Signal(os.Interrupt)
+	if err := stopRecording(cmd); err != nil {
+		fmt.Printf("Error stopping recording: %v\n", err)
 	}
 
-	err = cmd.Wait()
-	if err != nil && runtime.GOOS != "windows" {
-		return fmt.Errorf("error during recording: %w", err)
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// On Unix-like systems, exit status 1 might be normal for interrupted processes
+			if exitErr.ExitCode() != 1 || runtime.GOOS == "windows" {
+				return fmt.Errorf("error during recording: %w", err)
+			}
+		} else {
+			return fmt.Errorf("error during recording: %w", err)
+		}
 	}
 
 	fmt.Printf("Audio recorded successfully: %s\n", fullPath)

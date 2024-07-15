@@ -28,3 +28,5 @@ go.work
 
 # Files made by the app
 recordings/*
+models/*
+.env
