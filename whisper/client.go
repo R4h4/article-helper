@@ -10,9 +10,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+)
+
+const (
+	maxFileSize = 25 * 1024 * 1024 // 25 MB, adjust as needed
 )
 
 // Config holds the configuration for the Whisper API client
@@ -29,6 +34,10 @@ type Client struct {
 
 // NewClient creates a new Whisper API client
 func NewClient(config Config) *Client {
+	if config.APIEndpoint == "" {
+		config.APIEndpoint = "https://api.openai.com/v1/audio/transcriptions"
+	}
+
 	return &Client{
 		config: config,
 		client: &http.Client{
@@ -71,18 +80,81 @@ func (c *Client) TranscribeAudio(ctx context.Context, filePath string) (string, 
 }
 
 func (c *Client) openAndValidateFile(filePath string) (*os.File, error) {
+	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("file does not exist: %s", filePath)
 	}
 
+	// Open the file
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error opening file: %w", err)
 	}
 
-	// You might want to add more validation here, e.g., checking file type
+	// Get file info
+	fileInfo, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("error getting file info: %w", err)
+	}
+
+	// Check file size
+	if fileInfo.Size() > maxFileSize {
+		file.Close()
+		return nil, fmt.Errorf("file size exceeds maximum allowed size of %d bytes", maxFileSize)
+	}
+
+	// Check file extension
+	ext := strings.ToLower(filepath.Ext(filePath))
+	allowedExtensions := []string{".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm"}
+	if !contains(allowedExtensions, ext) {
+		file.Close()
+		return nil, fmt.Errorf("unsupported file extension: %s", ext)
+	}
+
+	// Check file type using magic numbers
+	buffer := make([]byte, 512)
+	_, err = file.Read(buffer)
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("error reading file header: %w", err)
+	}
+	fileType := http.DetectContentType(buffer)
+
+	allowedMimeTypes := []string{"audio/", "video/"}
+	if !startsWithAny(fileType, allowedMimeTypes) {
+		file.Close()
+		return nil, fmt.Errorf("unsupported file type: %s", fileType)
+	}
+
+	// Reset file pointer to the beginning
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("error resetting file pointer: %w", err)
+	}
 
 	return file, nil
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper function to check if a string starts with any of the given prefixes
+func startsWithAny(s string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) createMultipartRequest(file *os.File) (*bytes.Buffer, string, error) {
